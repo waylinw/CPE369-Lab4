@@ -10,11 +10,11 @@ public class Config {
         this.mongoServer = mongoServer;
     }
 
-    public String getPort() {
+    public int getPort() {
         return port;
     }
 
-    public void setPort(String port) {
+    public void setPort(int port) {
         this.port = port;
     }
 
@@ -83,7 +83,7 @@ public class Config {
     }
 
     private String mongoServer;
-    private String port;
+    private int port;
     private String databaseName;
     private String collectionName;
     private String monitorCollectionName;
@@ -94,9 +94,9 @@ public class Config {
     private String queryWordFile;
 
     public Config() {
-        //Do nothing
+        setMongoServer("localhost");
+        setPort(27017);
+        setDatabaseName("test");
+        setDelayAmount(10);
     }
-
-
-
 }

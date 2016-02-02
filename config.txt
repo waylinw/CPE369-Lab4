@@ -1,0 +1,12 @@
+{
+    "mongo" : "cslvm31"
+    "port" : 27017
+    "database" : "wwang16"
+    "collection" : "Lab4Data"
+    "monitor" : "Lab4Monitor"
+    "delay": 5
+    "words": null
+    "clientLog": null
+    "serverLog": null
+    "wordFilter": null
+}

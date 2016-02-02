@@ -4,7 +4,10 @@ import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
+import org.json.JSONObject;
+import org.json.JSONTokener;
 
+import java.io.FileInputStream;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -14,6 +17,31 @@ import java.util.logging.Logger;
 
 public class MessagingServer {
     public static void main(String[] args) {
+        if(args.length < 1) {
+            System.out.println("Usage: java -cp .:\\* MessagingServer <config file path>");
+            return;
+        }
+
+        JSONParser parser = new JSONParser();
+
+        try {
+
+            Object obj = parser.parse(new FileReader(
+                    "/Users/<username>/Documents/file1.txt"));
+
+            JSONObject jsonObject = (JSONObject) obj;
+        Config serverConfig = new Config();
+        try {
+            t = new JSONTokener(new FileInputStream(args[0]));
+            while (t.skipTo('{') == 0){};
+            JSONObject obj = new JSONObject(t);
+            serverConfig.setMongoServer(obj.getString("mongo"));
+        } catch (Exception e) {
+            System.out.println("Opening Json file failed, please make sure path is correct.");
+            return;
+        }
+
+
 
 
 
