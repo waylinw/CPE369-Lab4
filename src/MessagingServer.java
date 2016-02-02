@@ -7,13 +7,11 @@ import org.bson.Document;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
-import java.io.FileInputStream;
+import java.io.File;
+import java.io.FileReader;
+import java.util.IllegalFormatException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
-/**
- * Created by WaylinWang on 1/28/16.
- */
 
 public class MessagingServer {
     public static void main(String[] args) {
@@ -22,38 +20,58 @@ public class MessagingServer {
             return;
         }
 
-        JSONParser parser = new JSONParser();
+        Config configs = new Config();
 
         try {
-
-            Object obj = parser.parse(new FileReader(
-                    "/Users/<username>/Documents/file1.txt"));
-
-            JSONObject jsonObject = (JSONObject) obj;
-        Config serverConfig = new Config();
-        try {
-            t = new JSONTokener(new FileInputStream(args[0]));
-            while (t.skipTo('{') == 0){};
-            JSONObject obj = new JSONObject(t);
-            serverConfig.setMongoServer(obj.getString("mongo"));
-        } catch (Exception e) {
-            System.out.println("Opening Json file failed, please make sure path is correct.");
-            return;
+            JSONTokener t = new JSONTokener(new FileReader(new File("config.txt")));
+            t.skipTo('{');
+            JSONObject o = new JSONObject(t);
+            if (!o.isNull("mongo")) {
+                configs.setMongoServer(o.getString("mongo"));
+            }
+            if (!o.isNull("port")) {
+                configs.setPort(o.getInt("port"));
+            }
+            if (!o.isNull("database")){
+                configs.setDatabaseName(o.getString("database"));
+            }
+            configs.setCollectionName(o.getString("collection"));
+            configs.setMonitorCollectionName(o.getString("monitor"));
+            if (configs.getCollectionName().equals(configs.getMonitorCollectionName())) {
+                throw new IllegalArgumentException();
+            }
+            if (!o.isNull("delay")) {
+                configs.setDelayAmount(o.getInt("delay"));
+            }
+            if (!o.isNull("words")) {
+                configs.setWordFile(o.getString("words"));
+            }
+            if (!o.isNull("clientLog")) {
+                configs.setClientLogFile(o.getString("clientLog"));
+            }
+            if (!o.isNull("serverLog")) {
+                configs.setServerLogFile(o.getString("serverLog"));
+            }
+            if (!o.isNull("wordFilter")) {
+                configs.setQueryWordFile(o.getString("wordFilter"));
+            }
         }
-
-
-
-
+        catch (IllegalFormatException k) {
+            System.out.println("Collection name cannot be the same as monitor name!");
+        }
+        catch (Exception e) {
+            System.out.println("Could not read from config file");
+        }
 
         try {
             Logger logger = Logger.getLogger("org.mongodb.driver");  // turn off logging
             logger.setLevel(Level.OFF);                              // this lets us squash a lot
             // of annoying messages
 
-            MongoClient c = new MongoClient("cslvm31");  // connect to server
-            MongoDatabase db = c.getDatabase("wwang16");
+            MongoClient c = new MongoClient(configs.getMongoServer());  // connect to server
+            MongoDatabase db = c.getDatabase(configs.getDatabaseName());
 
-            MongoCollection<Document> collection = db.getCollection("Data");
+            MongoCollection<Document> collection = db.getCollection(configs.getCollectionName());
 
             FindIterable<Document> result = collection.find();
 
@@ -62,7 +80,6 @@ public class MessagingServer {
                 public void apply(final Document d) {
                     System.out.println(d);
                 }
-
             });
         }
         catch(Exception e) {
