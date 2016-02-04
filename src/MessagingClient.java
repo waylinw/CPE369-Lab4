@@ -7,8 +7,11 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Random;
 
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
 import org.bson.Document;
 import org.json.*;
 import com.mongodb.MongoClient;
@@ -16,6 +19,7 @@ import com.mongodb.MongoClient;
 public class MessagingClient {
     public static void main(String[] args) {
         final int millis = 1000;
+        final int maxCount = 40;
 
         JSONObject jsonObject;
         JSONTokener tokener;
@@ -34,11 +38,13 @@ public class MessagingClient {
 
         Calendar calendar;
         String configFile;
+        String lastUser = "";
         String line;
 
         double actualDelay = 0;
         int curMsg = 1;
-        int cycleCount = 0;
+        int cycleCount = 1;
+        int lastUserMessages = 0;
 
         // Check for command line arguments
         if (args.length < 1) {
@@ -84,8 +90,8 @@ public class MessagingClient {
             config.MonitorCollName = jsonObject.getString("monitor");
 
             if (config.CollectionName.equals(config.MonitorCollName)) {
-                System.out.println("Error: Monitor collection name must be different from collection name. Please try " +
-                        "again with a valid configuration file.");
+                System.out.println("Error: Monitor collection name must be different from collection name. Please " +
+                        "try again with a valid configuration file.");
             }
 
             if (jsonObject.get("delay") == null || jsonObject.getInt("delay") == 0) {
@@ -155,6 +161,31 @@ public class MessagingClient {
 
         // Start main forever loop
         for (;;) {
+            if (cycleCount == maxCount) {
+                cycleCount = 1;
+
+                FindIterable findIterable = cl.find(Filters.eq("user", lastUser));
+                MongoCursor mongoCursor = findIterable.iterator();
+
+                while (mongoCursor.hasNext()) {
+                    lastUserMessages++;
+                    mongoCursor.next();
+                }
+
+                System.out.println("Number of messages in collection: " + cl.count());
+                System.out.println("Number of messages written by last author: " + lastUserMessages);
+                try {
+                    fileWriter.write("Number of documents in collection: " + cl.count());
+                    fileWriter.write("Number of messages written by last author: " + lastUserMessages);
+                } catch (IOException e) {
+                    System.out.println("Error: Could not write to " + config.clientLogFile + ". Please try again.");
+                }
+
+                lastUserMessages = 0;
+            } else {
+                cycleCount++;
+            }
+
             // Randomly generate a delay amount
             actualDelay = rng.nextGaussian() * (config.delayAmount/2) + config.delayAmount;
             if (actualDelay < 2) {
@@ -173,6 +204,7 @@ public class MessagingClient {
             // Create a JSON object to send to collection
             curMsg += rng.nextInt(5) + 1;
             msg.genMessage(curMsg, rng, lines);
+            lastUser = msg.getUser();
 
             try {
                 //Determine if message is in-response and create JSON object accordingly
