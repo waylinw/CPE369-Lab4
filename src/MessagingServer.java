@@ -1,29 +1,234 @@
-import com.mongodb.Block;
 import com.mongodb.MongoClient;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
+import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
+import java.io.FileWriter;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
 import java.util.IllegalFormatException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class MessagingServer {
+    static MongoClient client;
+    static Config configs;
+    static MongoDatabase db;
+    static MongoCollection<Document> readCollection;
+    static MongoCollection<Document> writeCollection;
+    static FileWriter fileWriter;
+    static HashMap<String, Integer> queryWords;
+
+
     public static void main(String[] args) {
         if(args.length < 1) {
             System.out.println("Usage: java -cp .:\\* MessagingServer <config file path>");
             return;
         }
 
-        Config configs = new Config();
+        setupConfigs(args[0]);
+
+        long lastMessageCount = startupServer();
+        try {
+            Thread.sleep(configs.getDelayAmount() * 3000);
+        }
+        catch (Exception e) {
+            System.out.println("Program interrupted, will continue...");
+        }
+
+        //main loop to keep server running
+        boolean firstRun = true;
+        long lastMessageID = 0;
+        while(true) {
+            JSONObject monitorJson = getMonitorJsonStats(lastMessageCount);
+            writeCollection.insertOne(Document.parse(monitorJson.toString()));
+            MongoCursor<Document> lastMessage = readCollection.find().sort(new Document("_id", -1)).limit(1).iterator();
+            if(lastMessage.hasNext()) {
+                lastMessageID = lastMessage.next().getInteger("messageID");
+                System.out.println("last mesg id: " + lastMessageID);
+            }
+
+            if (firstRun) {
+                firstRun = false;
+            }
+            else {
+                findQueryWords(lastMessageID);
+            }
+            try {
+                lastMessageCount += monitorJson.getInt("new");
+                localPrintout(monitorJson);
+                Thread.sleep(configs.getDelayAmount() * 3000);
+            }
+            catch (Exception e){
+                System.out.println("Program interrupted, will retry operation...");
+            }
+        }
+    }
+
+    private static void findQueryWords(long lastMsgNum) {
+        for (String key: queryWords.keySet()) {
+
+        }
+    }
+
+    /**
+     * Gets monitor statistics per SSR5
+     * @param lastMessgCt
+     * @return JSONObject with current monitor stats
+     */
+    private static JSONObject getMonitorJsonStats(long lastMessgCt) {
+        JSONObject retVal = new JSONObject();
+
+        //Get Time
+        DateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
+        Date date = new Date();
+        String currentDate = dateFormat.format(date).toString();
+
+        //Total Message
+        long messageCount = readCollection.count();
+
+        //Unique senders
+        MongoCursor<String> result = readCollection.distinct("user", String.class).iterator();
+        long uniqueUsers = 0;
+        while (result.hasNext()) {
+            uniqueUsers++;
+            result.next();
+        }
+
+        //Number of New messages
+        long newMsg = messageCount - lastMessgCt;
 
         try {
-            JSONTokener t = new JSONTokener(new FileReader(new File("config.txt")));
+            retVal.put("time", dateFormat.format(date).toString());
+            retVal.put("messages", messageCount);
+            retVal.put("users", uniqueUsers);
+            retVal.put("new", newMsg);
+            //Message Status Stats
+            retVal.put("statusStats", getStatusInfo());
+            //Recipient Status Stats
+            retVal.put("recepientStats", getRecipientInfo());
+        }
+        catch (Exception e) {
+            System.out.println("Could not make Json object for stats...Exiting");
+            System.exit(1);
+        }
+
+        return retVal;
+    }
+
+    /**
+     * Gets the number of public, private, all messages
+     * @return JSONArray with status JSONObjects
+     * @throws JSONException
+     */
+    private static JSONArray getStatusInfo() throws JSONException {
+        JSONArray retVal = new JSONArray();
+
+        long statusPublicCount = 0, statusPrivateCount = 0, statusProtectedCount = 0;
+        MongoCursor<Document> statusPublic= readCollection.find(new Document("status", "public")).iterator();
+        while (statusPublic.hasNext()) {
+            statusPublicCount++;
+            statusPublic.next();
+        }
+
+        MongoCursor<Document> statusPrivate= readCollection.find(new Document("status", "private")).iterator();
+        while (statusPublic.hasNext()) {
+            statusPrivateCount++;
+            statusPrivate.next();
+        }
+
+        MongoCursor<Document> statusProtected= readCollection.find(new Document("status", "protected")).iterator();
+        while (statusProtected.hasNext()) {
+            statusProtectedCount++;
+            statusProtected.next();
+        }
+
+        JSONObject status_pu = new JSONObject();
+        status_pu.put("public", statusPublicCount);
+        JSONObject status_pr = new JSONObject();
+        status_pr.put("private", statusPrivateCount);
+        JSONObject status_protected = new JSONObject();
+        status_protected.put("protected", statusProtectedCount);
+        retVal.put(status_pu);
+        retVal.put(status_pr);
+        retVal.put(status_protected);
+
+        return retVal;
+    }
+
+    /**
+     * Gets the number of receipients for each receipient category
+     * @return JSONArray with receipient stats JSONObject
+     * @throws JSONException
+     */
+    private static JSONArray getRecipientInfo() throws JSONException {
+        JSONArray retVal = new JSONArray();
+
+        long subscriberCount = 0, allCount = 0, selfCount = 0, userCount = 0;
+        MongoCursor<Document> subscriber= readCollection.find(new Document("recepient", "subscribers")).iterator();
+        while (subscriber.hasNext()) {
+            subscriberCount++;
+            subscriber.next();
+        }
+
+        MongoCursor<Document> all= readCollection.find(new Document("recepient", "all")).iterator();
+        while (all.hasNext()) {
+            allCount++;
+            all.next();
+        }
+
+        MongoCursor<Document> self= readCollection.find(new Document("recepient", "self")).iterator();
+        while (self.hasNext()) {
+            selfCount++;
+            self.next();
+        }
+
+        MongoCursor<Document> user= readCollection.find(
+                new Document("recepient", java.util.regex.Pattern.compile("^u"))).iterator();
+        while (user.hasNext()) {
+            userCount++;
+            user.next();
+        }
+
+        JSONObject subObject = new JSONObject();
+        subObject.put("subscribers", subscriberCount);
+
+        JSONObject allObject = new JSONObject();
+        allObject.put("all", allCount);
+
+        JSONObject selfObject = new JSONObject();
+        selfObject.put("self", selfCount);
+
+        JSONObject userObject = new JSONObject();
+        userObject.put("userId", userCount);
+
+        retVal.put(subObject);
+        retVal.put(allObject);
+        retVal.put(selfObject);
+        retVal.put(userObject);
+
+        return retVal;
+    }
+
+    /**
+     * Reads in config file and stores it in a singleton
+     * @param configFilePath path to config file
+     */
+    public static void setupConfigs(String configFilePath) {
+        configs = new Config();
+        try {
+            JSONTokener t = new JSONTokener(new FileReader(new File(configFilePath)));
             t.skipTo('{');
             JSONObject o = new JSONObject(t);
             if (!o.isNull("mongo")) {
@@ -62,28 +267,104 @@ public class MessagingServer {
         catch (Exception e) {
             System.out.println("Could not read from config file");
         }
+    }
+
+    /**
+     * Start up the server as specified in SSR2
+     */
+    public static long startupServer() {
+        Logger logger = Logger.getLogger("org.mongodb.driver");
+        logger.setLevel(Level.OFF);
 
         try {
-            Logger logger = Logger.getLogger("org.mongodb.driver");  // turn off logging
-            logger.setLevel(Level.OFF);                              // this lets us squash a lot
-            // of annoying messages
-
-            MongoClient c = new MongoClient(configs.getMongoServer());  // connect to server
-            MongoDatabase db = c.getDatabase(configs.getDatabaseName());
-
-            MongoCollection<Document> collection = db.getCollection(configs.getCollectionName());
-
-            FindIterable<Document> result = collection.find();
-
-            result.forEach(new Block<Document>() {        // print each retrieved document
-                @Override
-                public void apply(final Document d) {
-                    System.out.println(d);
-                }
-            });
+            client = new MongoClient(configs.getMongoServer());
         }
-        catch(Exception e) {
-            System.out.println(e);
+        catch (Exception e) {
+            System.out.println("Unable to connect to: " + configs.getMongoServer());
+            System.exit(0);
+        }
+
+        try {
+            db = client.getDatabase(configs.getDatabaseName());
+        }
+        catch (Exception e) {
+            System.out.println("Unable to get database: " + configs.getDatabaseName());
+            System.exit(0);
+        }
+
+        try {
+            readCollection = db.getCollection(configs.getCollectionName());
+        }
+        catch (Exception e) {
+            System.out.println("Unable to open read data collection: " + configs.getCollectionName());
+            System.exit(0);
+        }
+
+        try {
+            BufferedReader reader = new BufferedReader(new FileReader(configs.getQueryWordFile()));
+            queryWords = new HashMap<String, Integer>();
+            String temp;
+            while ((temp = reader.readLine()) != null) {
+                queryWords.put(temp, 1);
+            }
+        }
+        catch (Exception e){
+            System.out.println("Error reading from " + configs.getQueryWordFile() + ". Please try again!");
+            System.exit(0);
+        }
+
+        try {
+            writeCollection = db.getCollection(configs.getMonitorCollectionName());
+            writeCollection.deleteMany(new Document());
+            if (writeCollection.count() != 0) throw new Exception("Unable to wipe log db");
+        }
+        catch (Exception e) {
+            System.out.println("Unable to open write data collection: " + configs.getMonitorCollectionName());
+            System.exit(0);
+        }
+
+        try {
+            fileWriter = new FileWriter(configs.getServerLogFile());
+        }
+        catch (Exception e){
+            System.out.println("Could not save log to local file");
+            System.exit(0);
+        }
+
+
+
+        DateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
+        Date date = new Date();
+        String currentDate = dateFormat.format(date).toString();
+        long initialCount = readCollection.count();
+
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("Current Time", currentDate);
+            obj.put("MongoDB Connection Info", client.getConnectPoint());
+            obj.put("Databse.Collection", readCollection.getNamespace());
+            obj.put("Total Documents in Collection", initialCount);
+            localPrintout(obj);
+        }
+        catch (JSONException e) {
+            e.printStackTrace();
+        }
+
+        return initialCount;
+    }
+
+    /**
+     * Writes given Json object to local log file
+     * @param T
+     */
+    public static void localPrintout(JSONObject T) {
+        try {
+            System.out.println(T.toString(4));
+            fileWriter.write(T.toString(4));
+            fileWriter.flush();
+        }
+        catch (Exception e) {
+            System.out.println("Unable to write to log file");
         }
     }
 }
