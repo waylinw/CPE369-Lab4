@@ -1,3 +1,8 @@
+/**
+ * CPE 369 - 03 Lab 4
+ * Waylin Wang, Myron Zhao
+ */
+
 import com.mongodb.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -21,7 +26,7 @@ import java.util.IllegalFormatException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-public class MessagingServer {
+public class ServerSpoof {
     static MongoClient client;
     static Config configs;
     static MongoDatabase db;

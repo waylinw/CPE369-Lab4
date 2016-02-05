@@ -1,5 +1,6 @@
 /**
- * Created by WaylinWang on 1/28/16.
+ * CPE 369 - 03 Lab 4
+ * Waylin Wang, Myron Zhao
  */
 
 import java.io.*;
@@ -16,7 +17,7 @@ import org.bson.Document;
 import org.json.*;
 import com.mongodb.MongoClient;
 
-public class MessagingClient {
+public class ClientSpoof {
     public static void main(String[] args) {
         final int millis = 1000;
         final int maxCount = 40;

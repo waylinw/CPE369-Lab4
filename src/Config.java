@@ -1,5 +1,6 @@
 /**
- * Created by WaylinWang on 1/30/16.
+ * CPE 369 - 03 Lab 4
+ * Waylin Wang, Myron Zhao
  */
 public class Config {
     public String getMongoServer() {
