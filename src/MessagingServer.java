@@ -1,8 +1,8 @@
 import com.mongodb.MongoClient;
-import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.UpdateOptions;
 import org.bson.Document;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -49,25 +49,48 @@ public class MessagingServer {
 
         //main loop to keep server running
         boolean firstRun = true;
+        boolean test = false;
         long lastMessageID = 0;
-        while(true) {
+
+        while(test) {
+            findQueryWords(1);
+            try {
+                Thread.sleep(configs.getDelayAmount() * 3000);
+            }
+            catch (Exception e){
+                System.out.println("Program interrupted, will retry operation...");
+            }
+        }
+        while(true && !test) {
             JSONObject monitorJson = getMonitorJsonStats(lastMessageCount);
+            //Insert into monitor DB
             writeCollection.insertOne(Document.parse(monitorJson.toString()));
             MongoCursor<Document> lastMessage = readCollection.find().sort(new Document("_id", -1)).limit(1).iterator();
-            if(lastMessage.hasNext()) {
-                lastMessageID = lastMessage.next().getInteger("messageID");
-                System.out.println("last mesg id: " + lastMessageID);
+
+            //Print out SSR5 query results
+            try {
+                lastMessageCount += monitorJson.getInt("new");
+                localPrintout(monitorJson);
+            }
+            catch (Exception e) {
+                System.out.println("Cannot print result for current run... will retry in 3 second...");
             }
 
+            //Check for query words
             if (firstRun) {
                 firstRun = false;
             }
             else {
                 findQueryWords(lastMessageID);
             }
+
+            if(lastMessage.hasNext()) {
+                lastMessageID = lastMessage.next().getInteger("messageID").longValue();
+            }
+
+            updateMonitorStats(monitorJson);
+
             try {
-                lastMessageCount += monitorJson.getInt("new");
-                localPrintout(monitorJson);
                 Thread.sleep(configs.getDelayAmount() * 3000);
             }
             catch (Exception e){
@@ -76,9 +99,57 @@ public class MessagingServer {
         }
     }
 
+    private static void updateMonitorStats(JSONObject monitorStats) {
+        UpdateOptions upsert = new UpdateOptions();
+        upsert.upsert(true);
+
+        try {
+            long msgTotal = monitorStats.getLong("messages");
+            long userTotal = monitorStats.getLong("users");
+            long newMsgTotal = monitorStats.getLong("new");
+            writeCollection.updateOne(new Document("recordType", "monitor totals"),
+                    new Document("$push", new Document("msgTotals", msgTotal)
+                            .append("userTotals", userTotal)
+                            .append("newMsgTotals", newMsgTotal)), upsert);
+        }
+        catch (Exception e) {
+            System.out.println("Insert to monitor DB failed. Exiting...");
+            System.exit(1);
+        }
+
+    }
+
+    /**
+     * Searches for all the messages with ID after lastMsgNum for containing
+     * words inside the provided queryWords.txt file
+     * Then it pretty prints it out to the screen and the log file
+     * @param lastMsgNum
+     */
     private static void findQueryWords(long lastMsgNum) {
         for (String key: queryWords.keySet()) {
+            String queryString = "\\b" + key + "\\b";
+            MongoCursor<Document> queryResult = readCollection.find(
+                    new Document("messageID",
+                            new Document("$gt", lastMsgNum))
+                            .append("text", java.util.regex.Pattern.compile(queryString))).iterator();
 
+            if (queryResult.hasNext()) {
+                JSONObject queryWordObj = new JSONObject();
+                try {
+                    queryWordObj.put("Word", key);
+                    JSONArray mesg = new JSONArray();
+                    while (queryResult.hasNext()) {
+                        JSONObject temp = new JSONObject(queryResult.next().toJson());
+                        mesg.put(temp);
+                    }
+                    queryWordObj.put("Message(s)", mesg);
+
+                    localPrintout(queryWordObj);
+                }
+                catch (Exception e) {
+                    System.out.println("Failed to parse JSON Object for query word: " + key);
+                }
+            }
         }
     }
 
@@ -93,7 +164,6 @@ public class MessagingServer {
         //Get Time
         DateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
         Date date = new Date();
-        String currentDate = dateFormat.format(date).toString();
 
         //Total Message
         long messageCount = readCollection.count();
@@ -360,7 +430,7 @@ public class MessagingServer {
     public static void localPrintout(JSONObject T) {
         try {
             System.out.println(T.toString(4));
-            fileWriter.write(T.toString(4));
+            fileWriter.write(T.toString(4) + "\n");
             fileWriter.flush();
         }
         catch (Exception e) {
